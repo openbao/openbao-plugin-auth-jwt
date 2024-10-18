@@ -1,21 +1,20 @@
 #!/usr/bin/env bats
 
-# See the vault-plugin-auth-jwt README for prereqs and setup.
+# See the openbao-plugin-auth-jwt README for prereqs and setup.
 
-# Vault logs will be written to VAULT_OUTFILE.
+# OpenBao logs will be written to BAO_OUTFILE.
 # BATs test logs will be written to SETUP_TEARDOWN_OUTFILE.
 
-export VAULT_ADDR='http://127.0.0.1:8200'
+export BAO_ADDR='http://127.0.0.1:8200'
 SETUP_TEARDOWN_OUTFILE=/tmp/bats-test.log
-VAULT_OUTFILE=/tmp/vault.log
-VAULT_TOKEN='root'
-VAULT_STARTUP_TIMEOUT=15
+BAO_OUTFILE=/tmp/openbao-jwt.log
+BAO_TOKEN='root'
+BAO_STARTUP_TIMEOUT=15
 
 # error if these are not set
 [ ${CLIENT_ID:?} ]
 [ ${CLIENT_SECRET:?} ]
 [ ${ISSUER:?} ]
-[ ${VAULT_LICENSE:?} ]
 
 # assert_status evaluates if `status` is equal to $1. If they are not equal a
 # log is written to the output file. This makes use of the BATs `status` and
@@ -48,45 +47,42 @@ setup_file(){
     # clear log file
     echo "" > $SETUP_TEARDOWN_OUTFILE
 
-    VAULT_TOKEN='root'
+    BAO_TOKEN='root'
 
     log "BEGIN SETUP"
 
-    if [[ -n ${VAULT_IMAGE} ]]; then
-      log "docker using VAULT_IMAGE: $VAULT_IMAGE"
-      docker pull ${VAULT_IMAGE?}
+    if [[ -n ${BAO_IMAGE} ]]; then
+      log "docker using BAO_IMAGE: $BAO_IMAGE"
+      docker pull ${BAO_IMAGE?}
 
       docker run \
-        --name=vault \
-        --hostname=vault \
+        --name=bao \
+        --hostname=bao \
         -p 8200:8200 \
-        -e VAULT_DEV_ROOT_TOKEN_ID="root" \
-        -e VAULT_ADDR="http://localhost:8200" \
-        -e VAULT_DEV_LISTEN_ADDRESS="0.0.0.0:8200" \
-        -e VAULT_LICENSE="${VAULT_LICENSE?}" \
+        -e BAO_DEV_ROOT_TOKEN_ID="root" \
+        -e BAO_ADDR="http://localhost:8200" \
+        -e BAO_DEV_LISTEN_ADDRESS="0.0.0.0:8200" \
         --privileged \
-        --detach ${VAULT_IMAGE?}
+        --detach ${BAO_IMAGE?}
     else
-      log "using local vault binary"
-      ./vault server -dev -dev-root-token-id=root \
-        -log-level=trace > $VAULT_OUTFILE 2>&1 &
+      log "using local bao binary"
+      ./bao server -dev -dev-root-token-id=root \
+        -log-level=trace > $BAO_OUTFILE 2>&1 &
     fi
 
-    log "waiting for vault..."
+    log "waiting for bao..."
     i=0
-    while ! vault status >/dev/null 2>&1; do
+    while ! bao status >/dev/null 2>&1; do
       sleep 1
       ((i=i+1))
-      [ $i -gt $VAULT_STARTUP_TIMEOUT ] && log_err "timed out waiting for vault to start"
+      [ $i -gt $BAO_STARTUP_TIMEOUT ] && log_err "timed out waiting for bao to start"
     done
 
-    vault login ${VAULT_TOKEN?}
+    bao login ${BAO_TOKEN?}
 
-    run vault status
+    run bao status
     assert_status 0
-    log "vault started successfully"
-
-    vault namespace create ns1
+    log "bao started successfully"
 
     log "END SETUP"
 }
@@ -95,38 +91,33 @@ setup_file(){
 teardown_file(){
     log "BEGIN TEARDOWN"
 
-    if [[ -n ${VAULT_IMAGE} ]]; then
-      log "removing vault docker container"
-      docker rm vault --force
+    if [[ -n ${BAO_IMAGE} ]]; then
+      log "removing bao docker container"
+      docker rm bao --force
     else
-      log "killing vault process"
-      pkill vault
+      log "killing bao process"
+      pkill bao
     fi
 
     log "END TEARDOWN"
 }
 
-@test "Read license" {
-    run vault read -format=json sys/license/status
-    assert_status 0
-}
-
 @test "Enable oidc auth" {
-    run vault auth enable --namespace=ns1 oidc
+    run bao auth enable oidc
     assert_status 0
 }
 
 @test "Setup kv and policies" {
-    run vault secrets enable --namespace=ns1 -version=2 kv
+    run bao secrets enable -version=2 kv
     assert_status 0
 
-    run vault kv put --namespace=ns1 kv/my-secret/secret-1 value=1234
+    run bao kv put kv/my-secret/secret-1 value=1234
     assert_status 0
 
-    run vault kv put --namespace=ns1 kv/your-secret/secret-2 value=5678
+    run bao kv put kv/your-secret/secret-2 value=5678
     assert_status 0
 
-    run vault policy write --namespace=ns1 test-policy -<<EOF
+    run bao policy write test-policy -<<EOF
 path "kv/data/my-secret/*" {
   capabilities = [ "read" ]
 }
@@ -137,7 +128,7 @@ EOF
 }
 
 @test "POST /auth/oidc/config - write config" {
-    run vault write --namespace=ns1 auth/oidc/config \
+    run bao write auth/oidc/config \
       oidc_discovery_url="$ISSUER" \
       oidc_client_id="$CLIENT_ID" \
       oidc_client_secret="$CLIENT_SECRET" \
@@ -147,7 +138,7 @@ EOF
 }
 
 @test "POST /auth/oidc/role/:name - create a role" {
-    run vault write --namespace=ns1 auth/oidc/role/test-role \
+    run bao write auth/oidc/role/test-role \
       user_claim="sub" \
       allowed_redirect_uris="http://localhost:8250/oidc/callback,http://localhost:8200/ui/vault/auth/oidc/oidc/callback" \
       bound_audiences="$CLIENT_ID" \
@@ -157,7 +148,7 @@ EOF
       verbose_oidc_logging=true
     assert_status 0
 
-    run vault write --namespace=ns1 auth/oidc/role/test-role-2 \
+    run bao write auth/oidc/role/test-role-2 \
       user_claim="sub" \
       allowed_redirect_uris="http://localhost:8250/oidc/callback,http://localhost:8200/ui/vault/auth/oidc/oidc/callback" \
       bound_audiences="$CLIENT_ID" \
@@ -169,36 +160,36 @@ EOF
 }
 
 @test "LIST /auth/oidc/role - list roles" {
-    run vault list --namespace=ns1 auth/oidc/role
+    run bao list auth/oidc/role
     assert_status 0
 }
 
 @test "GET /auth/oidc/role/:name - read a role" {
-    run vault read --namespace=ns1 auth/oidc/role/test-role
+    run bao read auth/oidc/role/test-role
     assert_status 0
 }
 
 @test "DELETE /auth/oidc/role/:name - delete a role" {
-    run vault delete --namespace=ns1 auth/oidc/role/test-role-2
+    run bao delete auth/oidc/role/test-role-2
     assert_status 0
 }
 
 # this test will open your default browser and ask you to login with your
 # OIDC Provider
 @test "Login with oidc auth" {
-    unset VAULT_TOKEN
-    run vault login --namespace=ns1 -method=oidc
+    unset BAO_TOKEN
+    run bao login -method=oidc
     assert_status 0
 }
 
 @test "Test policy prevents kv read" {
-    unset VAULT_TOKEN
-    run vault kv get --namespace=ns1 kv/your-secret/secret-2
+    unset BAO_TOKEN
+    run bao kv get kv/your-secret/secret-2
     assert_status 2
 }
 
 @test "Test policy allows kv read" {
-    unset VAULT_TOKEN
-    run vault kv get --namespace=ns1 kv/my-secret/secret-1
+    unset BAO_TOKEN
+    run bao kv get kv/my-secret/secret-1
     assert_status 0
 }
