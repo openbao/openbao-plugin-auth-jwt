@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MPL-2.0
 
 
-TOOL=vault-plugin-auth-jwt
+TOOL=openbao-plugin-auth-jwt
 #
 # This script builds the application from source for a platformx.
 set -e
