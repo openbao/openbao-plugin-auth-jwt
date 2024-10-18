@@ -1,4 +1,4 @@
-TOOL?=vault-plugin-auth-jwt
+TOOL?=openbao-plugin-auth-jwt
 TEST?=$$(go list ./... | grep -v /vendor/)
 EXTERNAL_TOOLS=
 BUILD_TAGS?=${TOOL}
